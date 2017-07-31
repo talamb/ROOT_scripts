@@ -1,5 +1,5 @@
 /*
- *NormCent.C
+ *fitPlaneWave.C
  *Created on 6/22/17
  *Last updated: 7/31/17
  *Description:
