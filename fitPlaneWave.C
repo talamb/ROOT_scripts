@@ -10,16 +10,26 @@
 #include "TVector3"
 #include "TMatrixF.h"
 #include "TDecompSVD.h"
+#include "TMath.h"
 #include <vector>
+
+
+
+//TODO
+//TODO
+//========== FIND A TObject that takes a direction and a position (Like a paramentric vector).
+//TODO
+//TODO
 
 /*============================================================================================
  * Function Declarations
  *============================================================================================
  */
 
-vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> indices);
-vector<TArrayF> recursiveFitPlaneWave(Int_t n, Float_t x_m[], Float_t y_m[], Float_t z_m[], Bool_t LUsech[]);
+vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> indices, Int_t ignoreInd);
+vector<TArrayF> itterFitPlaneWave(Int_t n, Float_t x_m[], Float_t y_m[], Float_t z_m[], Bool_t LUsech[]);
 Float_t average(Int_t n, Float_t arr[], vector<Int_t> indices);
+Double_t angleBetween(TVector3 v1, TVector3 v2);
 
 Double_t maxDeltaAngle = 0.005;
 Int_t minNumOfHits = 3;
@@ -29,14 +39,34 @@ Int_t minNumOfHits = 3;
  *===================================================================================================
  */ 
 vector<TArrayF> fitPlaneWave(Int_t nchannl, Float_t x_m[], Float_t y_m[], Float_t z_m[], Float_t hittimes_ns[], Bool_t LUseCh[]){
-	return recursiveFitPlaneWave(nchannl , x_m, y_m, z_m, LUseCh);
+
+	Int_t n_x = sizeof(x_m) / sizeof(Float_t);
+	Int_t n_y = sizeof(y_m) / sizeof(Float_t);
+	Int_t n_z = sizeof(z_m) / sizeof(Float_t);
+	Int_t n_times = sizeof(hittimes_ns) / sizeof(Float_t);
+	Int_t n_flags = sizeof(LUseCh) / sizeof(Bool_t);
+
+	if(nchannl != n_x || nchannl != n_y || nchannl != n_z){
+		printf("Spatial cooridante arrays are not the same size as nchannl.");
+		return {}
+	}
+	else if(nchannl != n_times){
+		printf("Hit time array is not the same size as nchannl.");
+		return{}	
+	}
+	else if(nchannl != n_flags){
+		print("Use flag array is not the same size as nchannl.");
+	}
+
+
+	return itterFitPlaneWave(nchannl , x_m, y_m, z_m, LUseCh);
 }
 
 /*===================================================================================================
- * recursiveFitPlaneWave: Goes through different permutations to find the elements that best fit the wave and removes the outliers.
+ * itterFitPlaneWave: Goes through different permutations to find the elements that best fit the wave and removes the outliers.
  *===================================================================================================
  */
-vector<TArrayF> recursiveFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Float_t z_m[], Bool_t LUseCh[]){
+vector<TArrayF> itterFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Float_t z_m[], Bool_t LUseCh[]){
 	
 	vector<Int_t> indices;
 	vector<TArrayF> BestFit;
@@ -71,15 +101,32 @@ vector<TArrayF> recursiveFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Fl
 	//TODO write recursiveFitPlaneWave loop
 	while(!finished){
 
-		//TODO Create originalAngle and set it to BestFit's angle
+		//Initialze BestAngle
+		Double_t maxAngle = 0.0f;
 
-		//TODO Create BestIndex set it to 0
+		//Initialize bestIndex
+		Int_t maxIndex = -1;
 
 		for(Int_t i= (indices.size()-1); i>= 0; --i){
-			//TODO make a subset of indices without the i-th term
-			//TODO Create a vector<TArrayF> set it to the svd of the subset
-			//TODO if delta(canidate angle, originalAngle) is greater than
-				//set canidateVector
+			//create Vector without the current index
+			vector<TArrayF> svdResult = SVD(x_m, y_m, z_m, indices, i);
+			TVector3 curItter(svdResult[1][0], svdResult[1][1], svdResult[1][2]);
+
+			//Calculate angle between curItter and Original data
+			Double_t deltaAngle = angleBetween(curItter, originAngle);
+
+
+			if(maxIndex = -1){
+				//set maxIndex and maxAngle
+				maxIndex = i;
+				maxAngle = deltaAngle;
+			}
+			else if(deltaAngle > maxAngle){
+				//set best index and maxAngle
+				maxIndex = i;
+				maxAngle = deltaAngle;
+			}
+
 			
 		}
 
@@ -97,9 +144,10 @@ vector<TArrayF> recursiveFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Fl
  *==================================================================================================
  */
 
-vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> indices){
+vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> indices, Int_t ignoreInd){
 
-	Int_t n = indices.size();
+	//We keep the ignoreInd is still a part of the array
+	Int_t n = indices.size()-1;
 
 	//Make sure there enough points NOTE: recusivePlaneWave should catch this. 
 	if(n < minNumOfHits){
@@ -150,7 +198,14 @@ vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> i
 		//Get the coeficients (normal) to plane equation save to results[1]
 		results[1][0] = fV[indexOfMin][0];
 		results[1][1] = fV[indexOfMin][1];
-		results[1][2] = fV[indexOfMin][2];
+
+		//TODO (ASK TO MAKE SURE) Force upward moving particles.		
+		if(fV[indexOfMin][2] < 0){
+			results[1][2] = -1.0f * fV[indexOfMin][2];
+		}
+		else {
+			results[1][2] = fV[indexOfMin][2];
+		}
 
 		printf("The Normal of the best fit plane is (%f, %f, %f)\n", results[1][0], results[1][0], results[1][2]); //TODO Remove in final
 
@@ -184,3 +239,11 @@ Float_t average(Int_t n, Float_t arr[], vector<Int_t> indices){
 	return total/((Float_t) n);
 }
 
+/*==================================================================================================
+ * angleBetween: takes in to TVector3 and returns the angle between the two vectors
+ *==================================================================================================
+ */
+
+Double_t angleBetween(TVector3 v1, TVector3 v2){
+	//TODO  FIND ANGLE BETWEEN TWO VECTORS!!!!!!!!!!!!!!!!
+}
