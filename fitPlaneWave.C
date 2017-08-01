@@ -1,25 +1,19 @@
 /*
  *fitPlaneWave.C
  *Created on 6/22/17
- *Last updated: 7/31/17
+ *Last updated: 8/01/17
  *Description:
  *Takes in Event data and reduces the noise and returns the centroid and Normal of the Plane Wave.
  */
 
 #include "TArrayF.h"
-#include "TVector3"
+#include "TVector3.h"
 #include "TMatrixF.h"
 #include "TDecompSVD.h"
 #include "TMath.h"
 #include <vector>
 
 
-
-//TODO
-//TODO
-//========== FIND A TObject that takes a direction and a position (Like a paramentric vector).
-//TODO
-//TODO
 
 /*============================================================================================
  * Function Declarations
@@ -28,7 +22,7 @@
 
 vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> indices, Int_t ignoreInd);
 vector<TArrayF> itterFitPlaneWave(Int_t n, Float_t x_m[], Float_t y_m[], Float_t z_m[], Bool_t LUsech[]);
-Float_t average(Int_t n, Float_t arr[], vector<Int_t> indices);
+Float_t average(Int_t n, Float_t arr[], vector<Int_t> indices, Int_t ignoreInd);
 Double_t angleBetween(TVector3 v1, TVector3 v2);
 
 Double_t maxDeltaAngle = 0.005;
@@ -39,25 +33,6 @@ Int_t minNumOfHits = 3;
  *===================================================================================================
  */ 
 vector<TArrayF> fitPlaneWave(Int_t nchannl, Float_t x_m[], Float_t y_m[], Float_t z_m[], Float_t hittimes_ns[], Bool_t LUseCh[]){
-
-	Int_t n_x = sizeof(x_m) / sizeof(Float_t);
-	Int_t n_y = sizeof(y_m) / sizeof(Float_t);
-	Int_t n_z = sizeof(z_m) / sizeof(Float_t);
-	Int_t n_times = sizeof(hittimes_ns) / sizeof(Float_t);
-	Int_t n_flags = sizeof(LUseCh) / sizeof(Bool_t);
-
-	if(nchannl != n_x || nchannl != n_y || nchannl != n_z){
-		printf("Spatial cooridante arrays are not the same size as nchannl.");
-		return {}
-	}
-	else if(nchannl != n_times){
-		printf("Hit time array is not the same size as nchannl.");
-		return{}	
-	}
-	else if(nchannl != n_flags){
-		print("Use flag array is not the same size as nchannl.");
-	}
-
 
 	return itterFitPlaneWave(nchannl , x_m, y_m, z_m, LUseCh);
 }
@@ -85,10 +60,10 @@ vector<TArrayF> itterFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Float_
 		return {};
 	}
 
-	//Initially set BestFit Plan Wave
-	BestFit = SVD(x_m, y_m, z_m, indices);
+	//Initially set originFit Plan Wave
+	originFit = SVD(x_m, y_m, z_m, indices, -1);
 	
-	if(BestFit.empty() || (BestFit[1][0] == 0 && BestFit[1][1] && BestFit[1][2])){
+	if(originFit.empty() || (originFit[1][0] == 0 && originFit[1][1] && BestFit[1][2])){
 		printf("fitPlaneWave was unable to fit the data. Most likely the data is singular.");//TODO probably remove in the final
 		return {};
 	}
@@ -98,15 +73,17 @@ vector<TArrayF> itterFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Float_
 	//Set intial angle
 	TVector3 originAngle(BestFit[1][0], BestFit[1][1], BestFit[1][2]);
 
-	//TODO write recursiveFitPlaneWave loop
+	//recursiveFitPlaneWave loop
 	while(!finished){
 
 		//Initialze BestAngle
 		Double_t maxAngle = 0.0f;
 
-		//Initialize bestIndex
+		//Initialize bestIndex.
 		Int_t maxIndex = -1;
 
+
+		//Find the index that can be gotten rid of
 		for(Int_t i= (indices.size()-1); i>= 0; --i){
 			//create Vector without the current index
 			vector<TArrayF> svdResult = SVD(x_m, y_m, z_m, indices, i);
@@ -116,7 +93,7 @@ vector<TArrayF> itterFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Float_
 			Double_t deltaAngle = angleBetween(curItter, originAngle);
 
 
-			if(maxIndex = -1){
+			if(maxIndex == -1){
 				//set maxIndex and maxAngle
 				maxIndex = i;
 				maxAngle = deltaAngle;
@@ -130,13 +107,20 @@ vector<TArrayF> itterFitPlaneWave(Int_t n , Float_t x_m[], Float_t y_m[], Float_
 			
 		}
 
-		//TODO check angle change from last iteration
-			//TODO if too much set finished to true
-			//TODO if within range set to BestFit and update indices
+		if(maxAngle <= maxDeltaAngle){
+			//removes the i-th element from the vector
+			indices.erase(indices.begin() + maxIndex);
+
+			if(indices.size() <= 3){ finish = true;	}
+		}
+		else{
+			//Angle threashold has been reached
+			finished = true;
+		}
 	}
 
 	//return the best fit planewave
-	return BestFit;
+	return SVD(x_m, y_m, z_m, indices, -1);
 }
 
 /*==================================================================================================
@@ -165,12 +149,15 @@ vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> i
 	Bool_t ok;
 	
 	//Calculate Centroid and store in the first element of results
-	results[0][0] = average(n, x_m, indices);
-	results[0][1] = average(n, y_m, indices);
-	results[0][2] = average(n, z_m, indices);
+	results[0][0] = average(n, x_m, indices, ignoreInd);
+	results[0][1] = average(n, y_m, indices, ignoreInd);
+	results[0][2] = average(n, z_m, indices, ignoreInd);
 
 	//Fill the matrix with the important values
 	for(Int_t i = n; i>= 0; --i){
+		if(i == ignoreInd) {
+			continue;
+		}
 		originalData[i][0] = x_m[indices[i]];
 		originalData[i][1] = y_m[indices[i]];
 		originalData[i][2] = z_m[indices[i]];
@@ -228,11 +215,14 @@ vector<TArrayF> SVD(Float_t x_m[], Float_t y_m[], Float_t z_m[], vector<Int_t> i
  *=================================================================================================
  */
 
-Float_t average(Int_t n, Float_t arr[], vector<Int_t> indices){
+Float_t average(Int_t n, Float_t arr[], vector<Int_t> indices, Int_t ignoreInd){
 
 	Float_t total = 0.0f;
 
 	for(Int_t i = 0; i < n; ++i){
+		if(i == ignoreInd){
+			continue;
+		}
 		total += arr[indices[i]];
 	}
 
@@ -245,5 +235,6 @@ Float_t average(Int_t n, Float_t arr[], vector<Int_t> indices){
  */
 
 Double_t angleBetween(TVector3 v1, TVector3 v2){
-	//TODO  FIND ANGLE BETWEEN TWO VECTORS!!!!!!!!!!!!!!!!
+	//theta = Acos( (v1 dot v2) / (Magnitude(v1) * Magnitude(v2))
+	return TMath::ACos( (v1.Dot(v2)) / (v1.Mag() * v2.Mag()) );
 }
